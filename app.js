@@ -72,13 +72,11 @@ app.get('/mtg/:id', async (request, response) => {
                             response.write(`<!doctype html><html lang="en"><head><title>Attendees</title><link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/5.0.0-alpha1/css/bootstrap.min.css" integrity="sha384-r4NyP46KrjDleawBgD5tp8Y7UzmLA05oM1iAEQ17CSuDqnUK2+k9luXQOfXJCJ4I" crossorigin="anonymous"></head><body>`);
                             response.write(`<H1>Participants (Meeting: ${meetingId})</H1><EM>Count: ${names.length}</EM>`);
 
-                            // debug(`${earliestStart} => ${earliestStart.substr(0,4)}, ${earliestStart.substr(5,2)}, ${earliestStart.substr(8,2)}, ${earliestStart.substr(11,2)}, ${earliestStart.substr(14,2)}, ${earliestStart.substr(17,2)}`)
                             response.write(`<p>Earliest Join: ${getLocal(earliestStart)} ET</p><p>Latest Leave: ${getLocal(latestFinish)} ET</p>`);
                             response.write(`<TABLE class="table table-striped table-sm"><thead class="table-dark"><TR><TH>Name</TH></TR></thead>`);
                             response.write(`<tbody class="table-light"><TR><TD>${names.join("</TD></TR><TR><TD>")}</TD></TR>`);
                             response.write(`</tbody></TABLE>`);
-                            response.write(`<script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.0/dist/umd/popper.min.js" integrity="sha384-Q6E9RHvbIyZFJoft+2mJbHaEWldlvI9IOYy5n3zV9zzTtmI3UksdQRVvoxMfooAo" crossorigin="anonymous"></script>
-                <script src="https://stackpath.bootstrapcdn.com/bootstrap/5.0.0-alpha1/js/bootstrap.min.js" integrity="sha384-oesi62hOLfzrys4LxRF63OJCXdXDipiYWBnvTl9Y9/TRlw5xlKIEHpNyvvDShgf/" crossorigin="anonymous"></script></body></html>`);
+                            response.write(`<script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.0/dist/umd/popper.min.js" integrity="sha384-Q6E9RHvbIyZFJoft+2mJbHaEWldlvI9IOYy5n3zV9zzTtmI3UksdQRVvoxMfooAo" crossorigin="anonymous"></script><script src="https://stackpath.bootstrapcdn.com/bootstrap/5.0.0-alpha1/js/bootstrap.min.js" integrity="sha384-oesi62hOLfzrys4LxRF63OJCXdXDipiYWBnvTl9Y9/TRlw5xlKIEHpNyvvDShgf/" crossorigin="anonymous"></script></body></html>`);
                             response.end();
                         } else {
                             response.send(`No participants found`);

@@ -32,7 +32,7 @@ Simple Express/Bootstrap5 for listing Zoom meeting participant lists.
 
 * `npm i` to install required modules
 * `node app.js`
-* Open `http:localhost:9999/mtg/123456` to see the participant list for meeting ID 123456
+* Open `http://localhost:9999/mtg/123456` to see the participant list for meeting ID 123456
 
 ## Modules
 

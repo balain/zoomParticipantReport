@@ -4,6 +4,9 @@
   "description": "List participants for specified Zoom meeting",
   "main": "app.js",
   "scripts": {
+    "start": "nodemon app.js",
+    "start-debug": "set DEBUG=*,-nodemon*,-express* && nodemon app.js",
+    "start-dev": "env NODE_ENV=dev DEBUG=*,-nodemon*,-express* nodemon app.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

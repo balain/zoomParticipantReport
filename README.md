@@ -6,6 +6,8 @@ zoomParticipantReport
 
 Simple Express/Bootstrap5 for listing Zoom meeting participant lists.
 
+![Screenshot](./images/screenshot.png)
+
 ## Getting Started
 
 ### Dependencies

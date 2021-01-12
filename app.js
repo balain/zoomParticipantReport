@@ -26,15 +26,12 @@ const meet2Start = { hour: 10, minute: 30 }
 
 function convertNameDataToRow (name, data) {
   const x = data.data.map(function (o) { return Date.parse(o.leave_time) })
-  // const maxTime = Math.max.apply(Math, x)
   if (data.data.length === 1) { // Simple case: only a single connection
     const start = new Date(Date.parse(data.data[0].join_time))
     return (`<B>${name}</B>: <!-- Total Time: ${Math.round(data.totaltime / 60)} minutes; -->Joined: ${getLocalTime(data.data[0].join_time)}(${Math.round((Date.parse(data.data[0].leave_time) - start) / (60 * 1000))} minutes) <!-- ; ${data.data.length} entr${data.data.length > 1 ? 'ies' : 'y'} -->`)
   } else { // Multiple connections, so parse each one
     const earliest = Date.parse(data.data[0].join_time)
     const latest = Date.parse(data.data[0].leave_time)
-
-    // debug(`convertNameDataToRow(${name}, data)...`)
 
     // sort the entries by join_time
     const d = data.data.sort((a, b) => (a.join_time > b.join_time) ? 1 : -1)
@@ -51,14 +48,11 @@ function convertNameDataToRow (name, data) {
 }
 
 function createConnectionBars (name, data, meet1StartDate, meet2StartDate, endOfServices) {
-  // debug(`createConnectionBars(${name}, data, ${meet1StartDate}, ${meet2StartDate}, ${endOfServices}) called...`)
   let imgColor = 'blue'
   let resp = ''
 
   if (data.data.length === 1) { // Simple case: only a single connection
     const wPx1 = getLagTime(data.data[0].join_time, meet1StartDate)
-    // const wPx2 = getLagTime(data.data[0].join_time, meet2StartDate)
-    // debug(`wPx1: `, wPx1, `; wPx2: `, wPx2)
     if (wPx1.fromMeeting1Start > 45) {
       imgColor = 'navy'
     } else {
@@ -76,7 +70,6 @@ function createConnectionBars (name, data, meet1StartDate, meet2StartDate, endOf
 
     // sort the entries by join_time
     const d = data.data.sort((a, b) => (a.join_time > b.join_time) ? 1 : -1)
-    // debug(`setting priorFinish to ${earliestStart}`)
     let priorFinish = earliestStart
 
     for (var i = 0; i < d.length; i++) {
@@ -90,8 +83,6 @@ function createConnectionBars (name, data, meet1StartDate, meet2StartDate, endOf
       }
       const wPx1 = getLagTime(d[i].join_time, priorFinish)
       const xPx1 = getLagTime(d[i].join_time, meet1StartDate)
-
-      // debug(`>>> priorFinish: ${priorFinish}; d: `, d, `\n>>>> priorText: ${priorText}; wPx1: `, wPx1)
 
       const imgColor = xPx1.fromMeeting1Start > 45 ? 'navy' : 'green'
 

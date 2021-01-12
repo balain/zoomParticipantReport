@@ -34,7 +34,7 @@ function convertNameDataToRow (name, data) {
     const earliest = Date.parse(data.data[0].join_time)
     const latest = Date.parse(data.data[0].leave_time)
 
-    debug(`convertNameDataToRow(${name}, data)...`)
+    // debug(`convertNameDataToRow(${name}, data)...`)
 
     // sort the entries by join_time
     const d = data.data.sort((a, b) => (a.join_time > b.join_time) ? 1 : -1)
@@ -51,7 +51,7 @@ function convertNameDataToRow (name, data) {
 }
 
 function createConnectionBars (name, data, meet1StartDate, meet2StartDate, endOfServices) {
-  debug(`createConnectionBars(${name}, data, ${meet1StartDate}, ${meet2StartDate}, ${endOfServices}) called...`)
+  // debug(`createConnectionBars(${name}, data, ${meet1StartDate}, ${meet2StartDate}, ${endOfServices}) called...`)
   let imgColor = 'blue'
   let resp = ''
 
@@ -131,12 +131,56 @@ function getLagTime (startTime, meetingStartTimeMS) {
   return { fromEarliestStart: deltaE, fromMeeting1Start: delta1 }
 }
 
+async function buildToken() {
+  const payload = { iss: config.APIKey, exp: ((new Date()).getTime() + 5000) }
+  return await jwt.sign(payload, config.APISecret)
+}
+
+async function buildOptions(path, method = 'GET', hostname = 'api.zoom.us') {
+  debug(`buildOptions(${path}, ${method}, ${hostname}) called...`)
+  const token = await buildToken()
+  debug(`...token: ${token}`)
+
+  return {
+      method: method,
+      hostname: hostname,
+      port: null,
+      path: path,
+      headers: {
+        authorization: `Bearer ${token}`
+      }
+    }
+}
+
+app.get('/users', async (request, response) => {
+  debug(`/users called...`)
+
+  try {
+    var options = await buildOptions(`/v2/users`)
+
+    var req = https.request(options, function (res) {
+      var chunks = []
+
+      res.on('data', function (chunk) {
+        chunks.push(chunk)
+      })
+
+      res.on('end', function () {
+        var body = Buffer.concat(chunks);
+        const result = JSON.parse(body.toString())
+        response.send(result)
+      })
+    })
+
+    req.end()
+
+  } catch (err) {
+    response.send(err)
+  }
+})
+
 app.get('/mtg/:id', async (request, response) => {
   debug(`/mtg called... ${request.params.id} `)
-
-  const payload = { iss: config.APIKey, exp: ((new Date()).getTime() + 5000) }
-
-  const token = await jwt.sign(payload, config.APISecret)
 
   const meetingIdStr = request.params.id
 
@@ -144,15 +188,7 @@ app.get('/mtg/:id', async (request, response) => {
     if (config.meetingIds && config.meetingIds.includes(meetingIdStr)) {
       const meetingId = Number(meetingIdStr)
       if (!isNaN(meetingId)) {
-        var options = {
-          method: 'GET',
-          hostname: 'api.zoom.us',
-          port: null,
-          path: `/v2/report/meetings/${meetingId}/participants?page_size=100`,
-          headers: {
-            authorization: `Bearer ${token}`
-          }
-        }
+        var options = await buildOptions(`/v2/report/meetings/${meetingId}/participants?page_size=100`)
 
         var req = https.request(options, function (res) {
           var chunks = []

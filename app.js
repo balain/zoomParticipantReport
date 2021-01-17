@@ -505,18 +505,18 @@ if (config.protocol === 'https' && config.httpsoptions) {
   // })
 }
 
-process.on('SIGKILL', () => {
-  console.log(`SIGKILL caught...`)
-  cleanExit()
-  process.exit(1)
-})
-  
+// process.on('SIGKILL', () => {
+//   console.log(`SIGKILL caught...`)
+//   cleanExit()
+//   process.exit(1)
+// })
+
 process.on('SIGINT', () => {
   console.log(`SIGINT caught...`)
   cleanExit()
   process.exit(1)
 })
-  
+
 process.on('SIGTERM', () => {
   console.log(`SIGTERM caught...`)
   cleanExit()

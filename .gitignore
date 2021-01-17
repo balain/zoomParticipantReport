@@ -4,3 +4,6 @@ node_modules/
 
 .lite_project.lua
 
+*.sqlite3
+*.db
+

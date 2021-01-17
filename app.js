@@ -6,6 +6,14 @@ const config = require('config')
 const NodeCache = require('node-cache')
 const cache = new NodeCache()
 
+let sqlite3 = false
+let db = false
+
+if (config.sqlite && config.sqlite.filename) {
+  sqlite3 = require('sqlite3')
+  db = new sqlite3.Database(config.sqlite.filename)
+}
+
 var https = require('https')
 var http = require('http')
 const jwt = require('jsonwebtoken')
@@ -227,7 +235,7 @@ app.get('/past_meetings/:id', async (request, response) => {
             res.on('end', function () {
               var body = Buffer.concat(chunks);
               const result = JSON.parse(body.toString())
-              
+
               let meetings = result.meetings.sort((a, b) => { return (b.start_time < a.start_time) ? -1 : (b.start_time > a.start_time) ? 1 : 0 })
 
               if (format == HTML_FORMAT) {
@@ -262,6 +270,53 @@ app.get('/past_meetings/:id', async (request, response) => {
   }
 })
 
+function updateMeetingAttendeesDatabase(meetingId, meetingInstance, data) {
+  debug(`updateMeetingAttendeesDatabase(${meetingId}, ${meetingInstance}, data) called...`)
+  const cacheId = `attendeesRecorded-${meetingId}`
+  meetingInstance = meetingInstance == false ? 'null' : meetingInstance
+  debug(`...meetingInstance == ${meetingInstance}`)
+
+  if (!cache.has(cacheId)) {
+    // debug(`updating database with `, data)
+    db.serialize(() => {
+      debug(`Updating database with history for meeting ID ${meetingId}`)
+
+      let delSql = `DELETE FROM attendees WHERE meetingId=${meetingId} AND meetingInstance${meetingInstance == 'null' ? ` is null` : `='${meetingInstance.replace(/\'/g, "''")}'`}`
+      debug(`delSql = ${delSql}`)
+      db.run(delSql)
+
+      data.participants.forEach((usr) => {
+        let insSql = `INSERT INTO attendees (
+            meetingId,
+            meetingInstance,
+            id,
+            user_id,
+            name,
+            user_email,
+            join_time,
+            leave_time,
+            duration
+          ) VALUES (
+            ${meetingId},
+            ${meetingInstance == 'null' ? null : `'${meetingInstance.replace(/\'/g, "''")}'`},
+            '${usr.id}',
+            '${usr.user_id}',
+            '${usr.name.replace(/\'/g, "''")}',
+            '${usr.user_email}',
+            '${usr.join_time}',
+            '${usr.leave_time}',
+            ${usr.duration}
+          )
+          `
+        db.run(insSql)
+      })
+  })
+  } else {
+    // TODO: Verify the db content is up-to-date by comparing data with db rows
+    debug(`Attendees database already current`)
+  }
+}
+
 async function getMeetingHistory(meetingId) {
   const cacheId = `meetingHistory-${meetingId}`
   return new Promise(async (resolve, reject) => {
@@ -270,6 +325,15 @@ async function getMeetingHistory(meetingId) {
       var options = await buildOptions(path)
       const response = await fetch(`https://api.zoom.us${path}`, options)
       const json = await response.json()
+      // If the database is setup, update the records
+      db.serialize(() => {
+        debug(`Updating database with history for meeting ID ${meetingId}`)
+
+        db.run(`DELETE FROM history WHERE id=${meetingId}`)
+        json.meetings.forEach((mtg) => {
+          db.run(`INSERT INTO history(id, uuid, start_time) VALUES (${meetingId}, '${mtg.uuid}', '${mtg.start_time}')`)
+        })
+      })
       cache.set(cacheId, json)
       debug(`...cache updated`)
     } else {
@@ -297,7 +361,7 @@ async function getPrevNextMeeting(meetingId, meetingInstance) {
   if (ndx > 0) { response.prev = meetings[ndx - 1] }
   if (ndx < meetings.length - 1) { response.next = meetings[ndx + 1] }
 
-  debug(`...returning: `, response)
+  // debug(`...returning: `, response)
   return(response)
 }
 
@@ -315,18 +379,15 @@ app.get('/mtg', async (request, response) => {
 
   debug(`meetingId: ${meetingId}; meetingInstance: ${meetingInstance}; meeting: ${meeting}`)
 
-  // let meetingHistory = await getMeetingHistory(meetingId)
-  let prevNextMeetings = false
-
-  // if (meetingInstance) {
-    prevNextMeetings = await getPrevNextMeeting(meetingId, meetingInstance)
-  // }
+  let prevNextMeetings = await getPrevNextMeeting(meetingId, meetingInstance)
 
   try {
     var path = `/v2/report/meetings/${meeting}/participants?page_size=100`
     const options = await buildOptions(path)
     const fetchResponse = await fetch(`https://api.zoom.us${path}`, options)
     const result = await fetchResponse.json()
+
+    updateMeetingAttendeesDatabase(meetingId, meetingInstance, result)
 
     const namesArr = []
     if (result.participants && result.participants.length > 0) {
@@ -427,15 +488,57 @@ app.get('/mtg', async (request, response) => {
   }
 })
 
+let server = false
+
 if (config.protocol === 'https' && config.httpsoptions) {
   const key = fs.readFileSync(config.httpsoptions.key)
   const cert = fs.readFileSync(config.httpsoptions.cert)
-  https.createServer({ key: key, cert: cert }, app).listen(port, () => {
+  server = https.createServer({ key: key, cert: cert }, app).listen(port, () => {
     console.log(`Server listening at port ${port}`)
   })
 } else { // Default to http
-  http.createServer(app).listen(port, () => {
+  server = app.listen(port, () => {
     console.log(`Server listening at port ${port}`)
   })
+  // http.createServer(app).listen(port, () => {
+  //   console.log(`Server listening at port ${port}`)
+  // })
 }
 
+process.on('SIGKILL', () => {
+  console.log(`SIGKILL caught...`)
+  cleanExit()
+  process.exit(1)
+})
+  
+process.on('SIGINT', () => {
+  console.log(`SIGINT caught...`)
+  cleanExit()
+  process.exit(1)
+})
+  
+process.on('SIGTERM', () => {
+  console.log(`SIGTERM caught...`)
+  cleanExit()
+  process.exit(1)
+})
+
+function cleanExit() {
+  if (db) {
+    console.info(`db... `, db)
+    db.close((err) => {
+      debug(`db closed: ${err}`)
+      if (err) {
+        console.info(`ERROR closing database: ${err}`)
+      } else {
+        console.info(`Database closed`)
+      }
+    })
+  } else {
+    console.info(`Database not connected`)
+  }
+  server.close()
+  console.info(`Server closed`)
+
+  return(1)
+}

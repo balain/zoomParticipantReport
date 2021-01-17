@@ -31,6 +31,17 @@ const JSON_FORMAT = "json"
 let earliestStart = false
 let latestFinish = false
 
+const BOOTSTRAP_HEADER = `<!doctype html><html lang="en"><head><title>Attendees</title><link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/5.0.0-alpha1/css/bootstrap.min.css" integrity="sha384-r4NyP46KrjDleawBgD5tp8Y7UzmLA05oM1iAEQ17CSuDqnUK2+k9luXQOfXJCJ4I" crossorigin="anonymous"></link>
+<style>
+  .mtgCol { white-space: nowrap; text-align: center; }
+  .timeblank { background-color: green; empty-cells: show;padding: 10px;align-content: center;vertical-align: middle;margin: 2px; }
+  .totaltimeservice { background-color: blue; empty-cells: show;padding: 10px;align-content: center;vertical-align: middle;margin: 2px; }
+  .totaltimeboth { background-color: lightblue; empty-cells: show;padding: 10px;align-content: center;vertical-align: middle;margin: 2px; }
+  .timeHighlight { color: blue; font-weight: bold; }
+</style>`
+
+const BOOTSTRAP_FOOTER = `<script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.0/dist/umd/popper.min.js" integrity="sha384-Q6E9RHvbIyZFJoft+2mJbHaEWldlvI9IOYy5n3zV9zzTtmI3UksdQRVvoxMfooAo" crossorigin="anonymous"></script><script src="https://stackpath.bootstrapcdn.com/bootstrap/5.0.0-alpha1/js/bootstrap.min.js" integrity="sha384-oesi62hOLfzrys4LxRF63OJCXdXDipiYWBnvTl9Y9/TRlw5xlKIEHpNyvvDShgf/" crossorigin="anonymous"></script></body></html>`
+
 if (config.authOptions) {
   app.use(basicAuth(config.authOptions))
 }
@@ -270,18 +281,43 @@ app.get('/past_meetings/:id', async (request, response) => {
   }
 })
 
-function updateMeetingAttendeesDatabase(meetingId, meetingInstance, data) {
+function cleanFieldContents(content) {
+  return(content.replace(/\'/g, "''"))
+}
+
+async function dbHasAttendees(meetingId, meetingInstance) {
+  debug(`dbHasAttendees(${meetingId}, ${meetingInstance}) called...`)
+  return new Promise((resolve, reject) => {
+    // TODO: Check if this is the latest meeting instance
+    // ...if so, the meetingInstance field would be null
+    const sql = `SELECT count(*) as counter FROM attendees WHERE meetingId=${meetingId} AND meetingInstance='${cleanFieldContents(meetingInstance)}'`
+    debug(`... sql: ${sql}`)
+    db.all(sql, [], (err, rows) => {
+      if (err) {
+        reject(err)
+      }
+
+      resolve(rows[0].counter == 0 ? false : rows[0].counter)
+    })
+  })
+}
+
+async function updateMeetingAttendeesDatabase(meetingId, meetingInstance, data) {
   debug(`updateMeetingAttendeesDatabase(${meetingId}, ${meetingInstance}, data) called...`)
   const cacheId = `attendeesRecorded-${meetingId}`
   meetingInstance = meetingInstance == false ? 'null' : meetingInstance
   debug(`...meetingInstance == ${meetingInstance}`)
 
-  if (!cache.has(cacheId)) {
-    // debug(`updating database with `, data)
+  const history = await dbHasAttendees(meetingId, meetingInstance)
+  debug(`history: `, history)
+  if (history) { // If so, use it
+    debug(`dbHasHistory returned true, so not updating db.`)
+    cache.set(cacheId, true)
+  } else { // If not, fetch it and add it to the db
     db.serialize(() => {
       debug(`Updating database with history for meeting ID ${meetingId}`)
 
-      let delSql = `DELETE FROM attendees WHERE meetingId=${meetingId} AND meetingInstance${meetingInstance == 'null' ? ` is null` : `='${meetingInstance.replace(/\'/g, "''")}'`}`
+      let delSql = `DELETE FROM attendees WHERE meetingId=${meetingId} AND meetingInstance${meetingInstance == 'null' ? ` is null` : `='${cleanFieldContents(meetingInstance)}'`}`
       debug(`delSql = ${delSql}`)
       db.run(delSql)
 
@@ -298,10 +334,10 @@ function updateMeetingAttendeesDatabase(meetingId, meetingInstance, data) {
             duration
           ) VALUES (
             ${meetingId},
-            ${meetingInstance == 'null' ? null : `'${meetingInstance.replace(/\'/g, "''")}'`},
+            ${meetingInstance == 'null' ? null : `'${cleanFieldContents(meetingInstance)}'`},
             '${usr.id}',
             '${usr.user_id}',
-            '${usr.name.replace(/\'/g, "''")}',
+            '${cleanFieldContents(usr.name)}',
             '${usr.user_email}',
             '${usr.join_time}',
             '${usr.leave_time}',
@@ -310,11 +346,31 @@ function updateMeetingAttendeesDatabase(meetingId, meetingInstance, data) {
           `
         db.run(insSql)
       })
-  })
-  } else {
-    // TODO: Verify the db content is up-to-date by comparing data with db rows
-    debug(`Attendees database already current`)
+      cache.set(cacheId, true)
+    })
+  } // if (dbHasHistory(...))
+}
+
+async function getPrevNextMeeting(meetingId, meetingInstance) {
+  let history = await getMeetingHistory(meetingId)
+
+  debug(`getPrevNextMeeting(${meetingId}, ${meetingInstance}) called...`)
+
+  meetings = history.meetings.sort((a, b) => { return (b.start_time > a.start_time) ? -1 : (b.start_time < a.start_time) ? 1 : 0 })
+
+  let response = { prev: false, next: false }
+
+  let ndx = meetings.length - 1
+
+  if (meetingInstance) {
+    ndx = meetings.findIndex(x => x.uuid == meetingInstance)
   }
+
+  if (ndx > 0) { response.prev = meetings[ndx - 1] }
+  if (ndx < meetings.length - 1) { response.next = meetings[ndx + 1] }
+
+  // debug(`...returning: `, response)
+  return(response)
 }
 
 async function getMeetingHistory(meetingId) {
@@ -343,31 +399,90 @@ async function getMeetingHistory(meetingId) {
   })
 }
 
-async function getPrevNextMeeting(meetingId, meetingInstance) {
-  let history = await getMeetingHistory(meetingId)
-
-  debug(`getPrevNextMeeting(${meetingId}, ${meetingInstance}) called...`)
-
-  meetings = history.meetings.sort((a, b) => { return (b.start_time > a.start_time) ? -1 : (b.start_time < a.start_time) ? 1 : 0 })
-
-  let response = { prev: false, next: false }
-
-  let ndx = meetings.length - 1
-
-  if (meetingInstance) {
-    ndx = meetings.findIndex(x => x.uuid == meetingInstance)
-  }
-
-  if (ndx > 0) { response.prev = meetings[ndx - 1] }
-  if (ndx < meetings.length - 1) { response.next = meetings[ndx + 1] }
-
-  // debug(`...returning: `, response)
-  return(response)
-}
-
 app.get('/history/:id', async (request, response) => {
   res.write(`history: `)
   res.send(await getMeetingHistory(request.params.id))
+})
+
+async function meetingAttendanceHistory(meetingId) {
+  const sql = `SELECT * FROM attendees WHERE meetingId=${meetingId}`
+  debug(`... sql: ${sql}`)
+  db.all(sql, [], (err, rows) => {
+    if (err) {
+      reject(err)
+    }
+    resolve(rows[0].counter)
+  })
+}
+
+app.get('/attendanceLog/:id', async (request, response) => {
+  const meetingId = request.params.id
+  // Get meeting dates - table columns
+  const sqlMtgs = `SELECT uuid, substr(start_time, 0,5) || " " || substr(start_time, 6,5) as mtgDate FROM history WHERE id=${meetingId} ORDER BY mtgDate DESC`
+  debug(`... sqlMtgs: ${sqlMtgs}`)
+  db.all(sqlMtgs, [], (errMtgs, rowsMtgs) => {
+    if (errMtgs) {
+      response.write(errMtgs)
+      response.end()
+    } else {
+      // Print the columns
+      const mtgUuids = {}
+      const mtgDatesToUuids = {}
+      const mtgSequence = []
+      rowsMtgs.forEach((mtg) => {
+        mtgUuids[mtg.uuid] = mtg.mtgDate
+        mtgDatesToUuids[mtg.mtgDate] = mtg.uuid
+        mtgSequence.push(mtg.uuid)
+      })
+      // debug(mtgUuids)
+      // debug(mtgDatesToUuids)
+
+      const mtgDates = rowsMtgs.map(x => x.mtgDate)
+      response.write(BOOTSTRAP_HEADER)
+      response.write(`<TABLE class="table table-striped table-sm" style="width: auto !important;"><thead class="table-dark">
+        <tr>
+          <th>name</th>
+          <th class="mtgCol">${mtgDates.map(x => x.replace(/\s/g, '<BR>')).join('</th><th class="mtgCol">')}</th>
+        </tr></thead>
+        <tbody>`)
+
+      // Now get attendee name and join info
+      const sqlAttend = `SELECT * FROM attendees WHERE meetingId=${meetingId} AND meetingInstance is not null ORDER BY name`
+      debug(`... sqlAttend: ${sqlAttend}`)
+      db.all(sqlAttend, [], (errAttend, rowsAttend) => {
+        if (errAttend) {
+          response.write(errAttend)
+          response.end()
+        } else {
+          // Get the names of attendees
+          const attendees = {}
+          rowsAttend.forEach((row) => {
+            if (!Object.keys(attendees).includes(row.name)) {
+              attendees[row.name] = []
+            }
+            // debug(`...updating attendees[${row.name}] - adding ${row.meetingInstance}`)
+            attendees[row.name].push(row.meetingInstance)
+          })
+          // Reformat the data
+          // Then print the columns for each attendee
+          Object.keys(attendees).sort().forEach((attendee) => {
+            response.write(`<tr><td>${attendee}</td>`)
+            // Now print the row
+            mtgSequence.forEach((mtgUuid) => {
+              response.write(`<td
+                class="mtgCol ${attendees[attendee].includes(mtgUuid) ? 'table-success' : 'absent'}"
+                title='Attendee: ${attendee.replace(/\'/g, "&apos;")}\nUUID: ${mtgUuid}\nDate: ${mtgUuids[mtgUuid]}'>
+                </td>`)
+            })
+            response.write(`</tr>`)
+          })
+          response.write(`</tbody></table>`)
+          response.write(BOOTSTRAP_FOOTER)
+          response.end()
+        }
+      })
+    }
+  })
 })
 
 app.get('/mtg', async (request, response) => {
@@ -420,14 +535,7 @@ app.get('/mtg', async (request, response) => {
       const meet2StartDate = new Date(e.getFullYear(), e.getMonth(), e.getDate(), meet2Start.hour, meet2Start.minute, 0)
 
       const names = [...new Set(Object.keys(namesArr))].sort()
-      response.write(`<!doctype html><html lang="en"><head><title>Attendees</title><link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/5.0.0-alpha1/css/bootstrap.min.css" integrity="sha384-r4NyP46KrjDleawBgD5tp8Y7UzmLA05oM1iAEQ17CSuDqnUK2+k9luXQOfXJCJ4I" crossorigin="anonymous">
-      <style>
-      .timeblank { background-color: green; empty-cells: show;padding: 10px;align-content: center;vertical-align: middle;margin: 2px; }
-      .totaltimeservice { background-color: blue; empty-cells: show;padding: 10px;align-content: center;vertical-align: middle;margin: 2px; }
-      .totaltimeboth { background-color: lightblue; empty-cells: show;padding: 10px;align-content: center;vertical-align: middle;margin: 2px; }
-      .timeHighlight { color: blue; font-weight: bold; }
-      </style>
-      </head><body>`)
+      response.write(BOOTSTRAP_HEADER)
       response.write(`<H1>Participants (Meeting: ${meetingId})</H1>`)
       response.write(`<div>`)
       if (prevNextMeetings.prev) {
@@ -456,18 +564,11 @@ app.get('/mtg', async (request, response) => {
       })
       response.write('</TD></TR>')
       response.write('</tbody></TABLE>')
-      response.write('<script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.0/dist/umd/popper.min.js" integrity="sha384-Q6E9RHvbIyZFJoft+2mJbHaEWldlvI9IOYy5n3zV9zzTtmI3UksdQRVvoxMfooAo" crossorigin="anonymous"></script><script src="https://stackpath.bootstrapcdn.com/bootstrap/5.0.0-alpha1/js/bootstrap.min.js" integrity="sha384-oesi62hOLfzrys4LxRF63OJCXdXDipiYWBnvTl9Y9/TRlw5xlKIEHpNyvvDShgf/" crossorigin="anonymous"></script></body></html>')
+      response.write(BOOTSTRAP_FOOTER)
       response.end()
     } else {
       // No participants
-      response.write(`<!doctype html><html lang="en"><head><title>Attendees</title><link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/5.0.0-alpha1/css/bootstrap.min.css" integrity="sha384-r4NyP46KrjDleawBgD5tp8Y7UzmLA05oM1iAEQ17CSuDqnUK2+k9luXQOfXJCJ4I" crossorigin="anonymous">
-      <style>
-      .timeblank { background-color: green; empty-cells: show;padding: 10px;align-content: center;vertical-align: middle;margin: 2px; }
-      .totaltimeservice { background-color: blue; empty-cells: show;padding: 10px;align-content: center;vertical-align: middle;margin: 2px; }
-      .totaltimeboth { background-color: lightblue; empty-cells: show;padding: 10px;align-content: center;vertical-align: middle;margin: 2px; }
-      .timeHighlight { color: blue; font-weight: bold; }
-      </style>
-      </head><body>`)
+      response.write(BOOTSTRAP_HEADER)
       // response.write('No participants found')
       response.write(`<div>`)
       if (prevNextMeetings.prev) {
@@ -478,7 +579,7 @@ app.get('/mtg', async (request, response) => {
         response.write(`<a href='/mtg?id=${meetingId}&instance=${prevNextMeetings.next.uuid}'>Next meeting (${prevNextMeetings.next.start_time.substr(0,10)})</a>`)
       }
       response.write(`</div>`)
-      response.write('<script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.0/dist/umd/popper.min.js" integrity="sha384-Q6E9RHvbIyZFJoft+2mJbHaEWldlvI9IOYy5n3zV9zzTtmI3UksdQRVvoxMfooAo" crossorigin="anonymous"></script><script src="https://stackpath.bootstrapcdn.com/bootstrap/5.0.0-alpha1/js/bootstrap.min.js" integrity="sha384-oesi62hOLfzrys4LxRF63OJCXdXDipiYWBnvTl9Y9/TRlw5xlKIEHpNyvvDShgf/" crossorigin="anonymous"></script></body></html>')
+      response.write(BOOTSTRAP_FOOTER)
       response.end()
     }
   } catch (error) {
@@ -500,16 +601,7 @@ if (config.protocol === 'https' && config.httpsoptions) {
   server = app.listen(port, () => {
     console.log(`Server listening at port ${port}`)
   })
-  // http.createServer(app).listen(port, () => {
-  //   console.log(`Server listening at port ${port}`)
-  // })
 }
-
-// process.on('SIGKILL', () => {
-//   console.log(`SIGKILL caught...`)
-//   cleanExit()
-//   process.exit(1)
-// })
 
 process.on('SIGINT', () => {
   console.log(`SIGINT caught...`)

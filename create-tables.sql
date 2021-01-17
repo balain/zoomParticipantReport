@@ -7,8 +7,8 @@ CREATE TABLE "history" (
 
 CREATE TABLE "attendees" (
 	"meetingId"	INTEGER,
-	"meetingInstance"	INTEGER,
-	"id"	INTEGER,
+	"meetingInstance"	TEXT,
+	"id"	TEXT,
 	"user_id"	TEXT NOT NULL,
 	"name"	TEXT,
 	"user_email"	TEXT,
